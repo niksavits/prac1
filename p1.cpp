@@ -15,7 +15,7 @@ using namespace std;
 #define MAX_COLUMNS 256
 #define MAX_ROWS 1000
 
-struct SimpleJSON {
+struct parsJson {
     string name;
     int tuples_limit;
     struct {  // Вложенная структура для таблицы и колонок
@@ -25,7 +25,7 @@ struct SimpleJSON {
     } structure[MAX_TABLES];
     int structure_size = 0;
 
-    SimpleJSON(const string& config_file) {
+    parsJson(const string& config_file) {
         ifstream file(config_file);
         if (!file) {
             cerr << "Не удалось открыть файл конфигурации: " << config_file << endl;  // Вывод ошибки
@@ -109,14 +109,14 @@ struct TableLock {
         pthread_mutex_destroy(&lock);
     }
 
-    void lock_table(const string& table_path) {
+    void tableLock(const string& table_path) {
         pthread_mutex_lock(&lock);  // Блокируем мьютекс
         ofstream lock_file(table_path + "_lock");  // Открываем файл блокировки
         lock_file << "locked";  // Записываем состояние блокировки
         lock_file.close();  // Закрываем файл
     }
 
-    void unlock_table(const string& table_path) {
+    void tableUnlock(const string& table_path) {
         ofstream lock_file(table_path + "_lock");
         lock_file << "unlocked";
         lock_file.close();
@@ -186,8 +186,8 @@ void increment_pk() {
     pk_file.close();
 }
 
-void insert_row(string values[], int values_count) {
-    table_lock.lock_table(table_path);  // Блокируем таблицу
+void insRow(string values[], int values_count) {
+    table_lock.tableLock(table_path);  // Блокируем таблицу
 
     string current_file = get_next_file();  // Получаем имя файла для вставки
 
@@ -221,11 +221,11 @@ void insert_row(string values[], int values_count) {
     file_out.close();
 
     increment_pk();  // Увеличиваем значение первичного ключа
-    table_lock.unlock_table(table_path);  // Разблокируем таблицу
+    table_lock.tableUnlock(table_path);  // Разблокируем таблицу
 }
 
-void delete_rows(const string& condition) {
-    table_lock.lock_table(table_path);  // Блокируем таблицу
+void delRow(const string& condition) {
+    table_lock.tableLock(table_path);  // Блокируем таблицу
 
     string temp_file_path = table_path + "/temp.csv";  // Временный файл для записи данных
     string file_path = get_next_file();  // Получаем имя файла с таблицей
@@ -241,7 +241,7 @@ void delete_rows(const string& condition) {
     while (getline(infile, line)) {
         cout << "Обрабатываем строку: " << line << endl;
 
-        if (evaluate_where_clause(line, condition)) {
+        if (test_where_string(line, condition)) {
             cout << "Строка соответствует условию: " << line << endl;
         } else {
             cout << "Строка не соответствует условию: " << line << endl;
@@ -255,10 +255,10 @@ void delete_rows(const string& condition) {
     remove(file_path.c_str());
     rename(temp_file_path.c_str(), file_path.c_str());
 
-    table_lock.unlock_table(table_path);  // Разблокируем таблицу
+    table_lock.tableUnlock(table_path);  // Разблокируем таблицу
 }
 
-void select_rows(const string columns[], int col_count, const string& where_clause) {
+void selectRows(const string columns[], int col_count, const string& where_clause) {
     string file_path = get_next_file();
     ifstream infile(file_path);
 
@@ -278,12 +278,12 @@ void select_rows(const string columns[], int col_count, const string& where_clau
         }
 
         // Проверяем, удовлетворяет ли строка условию WHERE
-        if (evaluate_where_clause(line, where_clause)) {
+        if (test_where_string(line, where_clause)) {
             if (!has_output) {
                 cout << "Вывод выбранных колонок:" << endl;
                 has_output = true;
             }
-            print_selected_columns(line, columns, col_count);
+            printSelCol(line, columns, col_count);
         }
     }
 
@@ -294,7 +294,7 @@ void select_rows(const string columns[], int col_count, const string& where_clau
     infile.close();
 }
 
-int get_column_index(const string& column_name) {
+int get_column_ind(const string& column_name) {
     string table_prefix;
     string actual_column;
 
@@ -317,12 +317,11 @@ int get_column_index(const string& column_name) {
             return i + 1;  // Возвращаем индекс колонки
         }
     }
-    return -1;  // Если колонка не найдена
+    return -1;
 }
 
 
-// Функция для проверки условия WHERE для строки
-bool evaluate_where_clause(const string& row, const string& where_clause) {
+bool test_where_string(const string& row, const string& where_clause) {
     cout << "Evaluating WHERE clause: " << where_clause << endl;
 
     if (where_clause.empty()) {
@@ -341,7 +340,7 @@ bool evaluate_where_clause(const string& row, const string& where_clause) {
     if (pos_lt != string::npos && (pos == string::npos || pos_lt < pos)) pos = pos_lt;
 
     if (pos == string::npos) {
-        cout << "Invalid WHERE clause format. No comparison operator found." << endl;
+        cout << "Неверный формат запроса WHERE" << endl;
         return false;
     }
 
@@ -352,11 +351,11 @@ bool evaluate_where_clause(const string& row, const string& where_clause) {
     value.erase(remove(value.begin(), value.end(), ' '), value.end());
     value.erase(remove(value.begin(), value.end(), '\''), value.end());  // Удаляем кавычки
 
-    int col_index = get_column_index(column_name);
-    cout << "Index for column '" << column_name << "': " << col_index << endl;
+    int col_index = get_column_ind(column_name);
+    cout << "Индекс для таблицы '" << column_name << "': " << col_index << endl;
 
     if (col_index == -1) {
-        cout << "Column not found: " << column_name << ". Returning false." << endl;
+        cout << "СТолбец не найден " << column_name << endl;
         return false;
     }
 
@@ -392,7 +391,7 @@ bool evaluate_where_clause(const string& row, const string& where_clause) {
 }
 
 // Функция для печати выбранных колонок из строки
-void print_selected_columns(const string& row, const string columns[], int col_count) {
+void printSelCol(const string& row, const string columns[], int col_count) {
     stringstream ss(row);  // Создаем строковый поток для строки данных
     string cell;  // Переменная для хранения значения ячейки
     int col_idx = 0;  // Индекс текущей колонки
@@ -426,7 +425,7 @@ struct Database {
     int tables_count = 0;
 
     Database(const string& config_file) {
-        SimpleJSON schema(config_file);
+        parsJson schema(config_file);
 
         schema_name = schema.name;
         tuples_limit = schema.tuples_limit;
@@ -451,34 +450,34 @@ struct Database {
     return nullptr;
 }
 
-    void insert_into(const string& table_name, string values[], int values_count) {
+    void insINTO(const string& table_name, string values[], int values_count) {
         Table* table = find_table(table_name);
         if (table) {
-            table->insert_row(values, values_count);
+            table->insRow(values, values_count);
         } else {
             cerr << "Таблица не найдена: " << table_name << endl;
         }
     }
 
-    void delete_from(const string& table_name, const string& condition) {
+    void delFROM(const string& table_name, const string& condition) {
         Table* table = find_table(table_name);
         if (table) {
-            table->delete_rows(condition);
+            table->delRow(condition);
         } else {
             cerr << "Таблица не найдена!" << endl;
         }
     }
 
-    void select_from(const string& table_name, const string columns[], int col_count, const string& where_clause) {
+    void selectFROM(const string& table_name, const string columns[], int col_count, const string& where_clause) {
         Table* table = find_table(table_name);
         if (table) {
-            table->select_rows(columns, col_count, where_clause);
+            table->selectRows(columns, col_count, where_clause);
         } else {
             cerr << "Таблица не найдена!" << endl;
         }
     }
 
-    void select_from_multiple(const string& table_name1, const string& table_name2, const string columns[], int col_count, const string& where_clause) {
+    void selFROMmult(const string& table_name1, const string& table_name2, const string columns[], int col_count, const string& where_clause) {
         Table* table1 = find_table(table_name1);
         Table* table2 = find_table(table_name2);
 
@@ -489,7 +488,7 @@ struct Database {
 
         if (!table2) {
             cout << "Таблица '" << table_name2 << "' не найдена. Выполняем выборку только из '" << table_name1 << "'." << endl;
-            table1->select_rows(columns, col_count, where_clause);
+            table1->selectRows(columns, col_count, where_clause);
             return;
         }
 
@@ -518,12 +517,12 @@ struct Database {
             for (int j = 1; j < count2; j++) {
                 string combined_row = rows1[i] + "," + rows2[j];  // Объединяем строки из обеих таблиц
 
-                if (table1->evaluate_where_clause(combined_row, where_clause)) {
+                if (table1->test_where_string(combined_row, where_clause)) {
                     if (!has_output) {
                         cout << "Вывод выбранных колонок из объединенных таблиц:" << endl;
                         has_output = true;
                     }
-                    table1->print_selected_columns(combined_row, columns, col_count);
+                    table1->printSelCol(combined_row, columns, col_count);
                 }
             }
         }
@@ -576,24 +575,24 @@ struct DynamicArray {
 };
 
 struct SQLParser {
-    static void execute_query(const string& query, Database& db) {
+    static void execQuery(const string& query, Database& db) {
         istringstream iss(query);  // Создаем поток для обработки SQL-запроса
         string command;
         iss >> command;
 
         if (command == "INSERT") {
-            handle_insert(iss, db);
+            handleIns(iss, db);
         } else if (command == "SELECT") {
-            handle_select(iss, db);
+            handleSelect(iss, db);
         } else if (command == "DELETE") {
-            handle_delete(iss, db);
+            handleDel(iss, db);
         } else {
             cerr << "Неизвестная SQL-команда: " << command << endl;
         }
     }
 
 private:
-    static void handle_insert(istringstream& iss, Database& db) {
+    static void handleIns(istringstream& iss, Database& db) {
         string into, table_name, values;
         iss >> into >> table_name;
 
@@ -621,11 +620,11 @@ private:
             row_values[values_count++] = value;
         }
 
-        db.insert_into(table_name, row_values, values_count);
+        db.insINTO(table_name, row_values, values_count);
         cout << "Команда INSERT выполнена успешно" << endl;
     }
 
-    static void handle_delete(istringstream& iss, Database& db) {
+    static void handleDel(istringstream& iss, Database& db) {
         string from, table_name, condition;
         iss >> from >> table_name;
         getline(iss, condition);
@@ -636,11 +635,11 @@ private:
             condition.clear();
         }
 
-        db.delete_from(table_name, condition);  // Удаляем строки, соответствующие условию
+        db.delFROM(table_name, condition);  // Удаляем строки, соответствующие условию
         cout << "Команда DELETE выполнена успешно" << endl;
     }
 
-    static void handle_select(istringstream& iss, Database& db) {
+    static void handleSelect(istringstream& iss, Database& db) {
     string select_part, from_part, where_clause;
     string query = iss.str();
 
@@ -665,9 +664,9 @@ private:
     }
 
     // Убираем лишние пробелы в каждой части
-    trim(select_part);
-    trim(from_part);
-    trim(where_clause);
+    space(select_part);
+    space(from_part);
+    space(where_clause);
 
     // Разбираем колонки из части SELECT
     string columns_str;
@@ -682,7 +681,7 @@ private:
 
     // Используем динамический массив для хранения колонок
     DynamicArray parsed_columns;
-    parse_columns(column_names, parsed_columns);
+    parseCol(column_names, parsed_columns);
 
     // Разбираем таблицы из секции FROM
     istringstream from_iss(from_part);
@@ -693,7 +692,7 @@ private:
 
     // Извлекаем таблицы из секции FROM
     while (getline(from_iss, table_name, ',')) {
-        trim(table_name); // Убираем лишние пробелы вокруг названий таблиц
+        space(table_name); // Убираем лишние пробелы вокруг названий таблиц
         table_names.push_back(table_name);
     }
 
@@ -711,27 +710,27 @@ private:
 
     // Выполняем выборку с учетом WHERE (если оно есть)
     if (table_names.size == 1) {
-        db.select_from(tables[0], parsed_columns.data, parsed_columns.size, where_clause);
+        db.selectFROM(tables[0], parsed_columns.data, parsed_columns.size, where_clause);
     } else if (table_names.size == 2) {
-        db.select_from_multiple(tables[0], tables[1], parsed_columns.data, parsed_columns.size, where_clause);
+        db.selFROMmult(tables[0], tables[1], parsed_columns.data, parsed_columns.size, where_clause);
     } else {
         cerr << "Ошибка: Запрос может поддерживать только одну или две таблицы." << endl;
     }
 }
 
-static void parse_columns(const string& columns_str, DynamicArray& parsed_columns) {
+static void parseCol(const string& columns_str, DynamicArray& parsed_columns) {
     stringstream ss(columns_str);
     string column;
     while (getline(ss, column, ',')) {
         // Убираем пробелы вокруг колонок
-        trim(column);
+        space(column);
 
         // Добавляем колонку в динамический массив
         parsed_columns.push_back(column);
     }
 }
 
-static void trim(string& str) {
+static void space(string& str) {
     size_t first = str.find_first_not_of(' ');
     size_t last = str.find_last_not_of(' ');
     if (first != string::npos && last != string::npos) {
@@ -755,7 +754,7 @@ int main() {
             break;
         }
 
-        SQLParser::execute_query(user_query, db);
+        SQLParser::execQuery(user_query, db);
     }
 
     return 0;
