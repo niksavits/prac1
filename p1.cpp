@@ -295,14 +295,31 @@ void select_rows(const string columns[], int col_count, const string& where_clau
 }
 
 int get_column_index(const string& column_name) {
+    string table_prefix;
+    string actual_column;
+
+    // Если колонка имеет формат "table.column", разбиваем её
+    size_t dot_pos = column_name.find('.');
+    if (dot_pos != string::npos) {
+        table_prefix = column_name.substr(0, dot_pos);
+        actual_column = column_name.substr(dot_pos + 1);
+    } else {
+        actual_column = column_name;
+    }
+
+    // Проверка, является ли колонка частью данной таблицы
     for (int i = 0; i < columns_count; ++i) {
-        if (columns[i] == column_name) {
-            i++;
-            return i;
+        if (columns[i] == actual_column) {
+            // Если префикс таблицы указан, проверяем его соответствие
+            if (!table_prefix.empty() && table_prefix != table_name) {
+                continue;  // Пропускаем, если префикс не совпадает с текущей таблицей
+            }
+            return i + 1;  // Возвращаем индекс колонки
         }
     }
-    return -1;
+    return -1;  // Если колонка не найдена
 }
+
 
 // Функция для проверки условия WHERE для строки
 bool evaluate_where_clause(const string& row, const string& where_clause) {
@@ -411,7 +428,7 @@ struct Database {
     Database(const string& config_file) {
         SimpleJSON schema(config_file);
 
-        schema_name = schema.name
+        schema_name = schema.name;
         tuples_limit = schema.tuples_limit;
 
         mkdir(schema_name.c_str(), 0777);
@@ -424,14 +441,15 @@ struct Database {
     }
 
     Table* find_table(const string& table_name) {
-        // Ищем таблицу по имени
-        for (int i = 0; i < tables_count; ++i) {
-            if (tables[i].table_name == table_name) {
-                return &tables[i];
-            }
+    for (int i = 0; i < tables_count; ++i) {
+        cout << "Проверяем таблицу: " << tables[i].table_name << endl;  // Вывод отладочной информации
+        if (tables[i].table_name == table_name) {
+            return &tables[i];
         }
-        return nullptr;
     }
+    cout << "Таблица не найдена: " << table_name << endl;
+    return nullptr;
+}
 
     void insert_into(const string& table_name, string values[], int values_count) {
         Table* table = find_table(table_name);
@@ -518,6 +536,44 @@ struct Database {
         infile2.close();
     }
 };
+struct DynamicArray {
+    string* data;
+    int size;
+    int capacity;
+
+    // Конструктор, инициализация массива
+    DynamicArray() {
+        size = 0;
+        capacity = 10; // Начальная ёмкость массива
+        data = new string[capacity];
+    }
+
+    // Функция добавления элемента в массив
+    void push_back(const string& value) {
+        if (size == capacity) {
+            // Расширяем массив, если достигнут предел
+            capacity *= 2;
+            string* new_data = new string[capacity];
+            for (int i = 0; i < size; i++) {
+                new_data[i] = data[i];
+            }
+            delete[] data;
+            data = new_data;
+        }
+        data[size] = value;
+        size++;
+    }
+
+    // Доступ к элементам массива
+    string& operator[](int index) {
+        return data[index];
+    }
+
+    // Освобождение памяти
+    ~DynamicArray() {
+        delete[] data;
+    }
+};
 
 struct SQLParser {
     static void execute_query(const string& query, Database& db) {
@@ -585,60 +641,105 @@ private:
     }
 
     static void handle_select(istringstream& iss, Database& db) {
-        string columns_str, from, where_clause;
-        iss >> columns_str >> from;
+    string select_part, from_part, where_clause;
+    string query = iss.str();
 
-        string table_name;
-        iss >> table_name;
+    // Ищем ключевые слова в строке запроса
+    size_t from_pos = query.find("FROM");
+    size_t where_pos = query.find("WHERE");
 
-        string parsed_columns[MAX_COLUMNS];  // Массив для хранения имен колонок
-        int col_count = 0;  // Счетчик для количества колонок
-
-        if (columns_str == "*") {
-            Table* table = db.find_table(table_name);  // Ищем таблицу
-            if (table) {
-                col_count = table->columns_count;  // Получаем количество колонок
-                for (int i = 0; i < col_count; ++i) {
-                    parsed_columns[i] = table->columns[i];  // Копируем все имена колонок
-                }
-            }
-        } else {
-            parse_columns(columns_str, parsed_columns, col_count);  // Разбираем указанные колонки
-        }
-
-        // Извлекаем условие WHERE, если оно указано
-        getline(iss, where_clause);
-        if (!where_clause.empty() && where_clause.find("WHERE") != string::npos) {
-            where_clause = where_clause.substr(where_clause.find("WHERE") + 6);
-        } else {
-            where_clause.clear();
-        }
-
-        db.select_from(table_name, parsed_columns, col_count, where_clause);
+    // Если нет ключевого слова FROM, это некорректный запрос
+    if (from_pos == string::npos) {
+        cerr << "Ошибка: Ключевое слово FROM не найдено в запросе." << endl;
+        return;
     }
 
-    static void parse_columns(const string& columns_str, string parsed_columns[], int& col_count) {
-        stringstream ss(columns_str);
-        string column;
-        while (getline(ss, column, ',')) {
-            column.erase(remove(column.begin(), column.end(), ' '), column.end());
-            size_t dot_pos = column.find('.');  // Ищем точку для удаления префикса таблицы
-            if (dot_pos != string::npos) {
-                column = column.substr(dot_pos + 1);  // Удаляем префикс таблицы
-            }
-            parsed_columns[col_count++] = column;
+    // Извлекаем части запроса
+    select_part = query.substr(0, from_pos); // До FROM - часть SELECT
+    if (where_pos != string::npos) {
+        from_part = query.substr(from_pos + 5, where_pos - from_pos - 5); // Между FROM и WHERE
+        where_clause = query.substr(where_pos + 6); // После WHERE
+    } else {
+        from_part = query.substr(from_pos + 5); // После FROM до конца
+        where_clause = ""; // Если нет WHERE, условие пустое
+    }
+
+    // Убираем лишние пробелы в каждой части
+    trim(select_part);
+    trim(from_part);
+    trim(where_clause);
+
+    // Разбираем колонки из части SELECT
+    string columns_str;
+    istringstream select_iss(select_part);
+    select_iss >> columns_str; // Получаем ключевое слово SELECT
+    if (columns_str != "SELECT") {
+        cerr << "Ошибка: Ожидалось ключевое слово SELECT." << endl;
+        return;
+    }
+
+    string column_names = select_part.substr(select_part.find("SELECT") + 7); // Колонки после SELECT
+
+    // Используем динамический массив для хранения колонок
+    DynamicArray parsed_columns;
+    parse_columns(column_names, parsed_columns);
+
+    // Разбираем таблицы из секции FROM
+    istringstream from_iss(from_part);
+    string table_name;
+
+    // Используем динамический массив для хранения таблиц
+    DynamicArray table_names;
+
+    // Извлекаем таблицы из секции FROM
+    while (getline(from_iss, table_name, ',')) {
+        trim(table_name); // Убираем лишние пробелы вокруг названий таблиц
+        table_names.push_back(table_name);
+    }
+
+    // Проверка, найдены ли все таблицы в базе данных
+    DynamicArray tables;
+    for (int i = 0; i < table_names.size; ++i) {
+        Table* table = db.find_table(table_names[i]);
+        if (table) {
+            tables.push_back(table->table_name);
+        } else {
+            cerr << "Таблица не найдена: " << table_names[i] << endl;
+            return;
         }
     }
 
-    static void trim(string& str) {
-        size_t first = str.find_first_not_of(' ');
-        size_t last = str.find_last_not_of(' ');
-        if (first != string::npos && last != string::npos) {
-            str = str.substr(first, (last - first + 1));
-        } else {
-            str.clear();
-        }
+    // Выполняем выборку с учетом WHERE (если оно есть)
+    if (table_names.size == 1) {
+        db.select_from(tables[0], parsed_columns.data, parsed_columns.size, where_clause);
+    } else if (table_names.size == 2) {
+        db.select_from_multiple(tables[0], tables[1], parsed_columns.data, parsed_columns.size, where_clause);
+    } else {
+        cerr << "Ошибка: Запрос может поддерживать только одну или две таблицы." << endl;
     }
+}
+
+static void parse_columns(const string& columns_str, DynamicArray& parsed_columns) {
+    stringstream ss(columns_str);
+    string column;
+    while (getline(ss, column, ',')) {
+        // Убираем пробелы вокруг колонок
+        trim(column);
+
+        // Добавляем колонку в динамический массив
+        parsed_columns.push_back(column);
+    }
+}
+
+static void trim(string& str) {
+    size_t first = str.find_first_not_of(' ');
+    size_t last = str.find_last_not_of(' ');
+    if (first != string::npos && last != string::npos) {
+        str = str.substr(first, (last - first + 1));
+    } else {
+        str.clear();
+    }
+}
 };
 
 int main() {
