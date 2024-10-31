@@ -322,10 +322,8 @@ int get_column_ind(const string& column_name) {
 
 
 bool test_where_string(const string& row, const string& where_clause) {
-    cout << "Evaluating WHERE clause: " << where_clause << endl;
 
     if (where_clause.empty()) {
-        cout << "WHERE clause is empty. Returning true." << endl;
         return true;
     }
 
@@ -441,7 +439,6 @@ struct Database {
 
     Table* find_table(const string& table_name) {
     for (int i = 0; i < tables_count; ++i) {
-        cout << "Проверяем таблицу: " << tables[i].table_name << endl;  // Вывод отладочной информации
         if (tables[i].table_name == table_name) {
             return &tables[i];
         }
@@ -535,42 +532,63 @@ struct Database {
         infile2.close();
     }
 };
-struct DynamicArray {
-    string* data;
+
+struct Node {
+    string data;
+    Node* next;
+
+    Node(const string& value) : data(value), next(nullptr) {}
+};
+
+struct LinkedList {
+    Node* head;
     int size;
-    int capacity;
 
-    // Конструктор, инициализация массива
-    DynamicArray() {
-        size = 0;
-        capacity = 10; // Начальная ёмкость массива
-        data = new string[capacity];
-    }
+    LinkedList() : head(nullptr), size(0) {}
 
-    // Функция добавления элемента в массив
     void push_back(const string& value) {
-        if (size == capacity) {
-            // Расширяем массив, если достигнут предел
-            capacity *= 2;
-            string* new_data = new string[capacity];
-            for (int i = 0; i < size; i++) {
-                new_data[i] = data[i];
+        Node* newNode = new Node(value);
+        if (!head) {
+            head = newNode;
+        } else {
+            Node* current = head;
+            while (current->next) {
+                current = current->next;
             }
-            delete[] data;
-            data = new_data;
+            current->next = newNode;
         }
-        data[size] = value;
         size++;
     }
 
-    // Доступ к элементам массива
-    string& operator[](int index) {
-        return data[index];
+    // Метод для доступа к элементу по индексу
+    string& get(int index) {
+        if (index < 0 || index >= size) {
+            throw out_of_range("Index out of range");
+        }
+        Node* current = head;
+        for (int i = 0; i < index; ++i) {
+            current = current->next;
+        }
+        return current->data;
     }
 
-    // Освобождение памяти
-    ~DynamicArray() {
-        delete[] data;
+    // Метод для печати списка (для отладки)
+    void print() const {
+        Node* current = head;
+        while (current) {
+            cout << current->data << " ";
+            current = current->next;
+        }
+        cout << endl;
+    }
+
+    ~LinkedList() {
+        Node* current = head;
+        while (current) {
+            Node* nextNode = current->next;
+            delete current;
+            current = nextNode;
+        }
     }
 };
 
@@ -614,7 +632,6 @@ private:
         stringstream ss(row_data);
         string value;
         while (getline(ss, value, ',')) {
-
             value.erase(remove(value.begin(), value.end(), '\"'), value.end());
             value.erase(remove(value.begin(), value.end(), ' '), value.end());
             row_values[values_count++] = value;
@@ -640,105 +657,125 @@ private:
     }
 
     static void handleSelect(istringstream& iss, Database& db) {
-    string select_part, from_part, where_clause;
-    string query = iss.str();
+        string select_part, from_part, where_clause;
+        string query = iss.str();
 
-    // Ищем ключевые слова в строке запроса
-    size_t from_pos = query.find("FROM");
-    size_t where_pos = query.find("WHERE");
+        // Ищем ключевые слова в строке запроса
+        size_t from_pos = query.find("FROM");
+        size_t where_pos = query.find("WHERE");
 
-    // Если нет ключевого слова FROM, это некорректный запрос
-    if (from_pos == string::npos) {
-        cerr << "Ошибка: Ключевое слово FROM не найдено в запросе." << endl;
+        if (from_pos == string::npos) {
+            cerr << "Ошибка: Ключевое слово FROM не найдено в запросе." << endl;
+            return;
+        }
+
+        select_part = query.substr(0, from_pos);
+        if (where_pos != string::npos) {
+            from_part = query.substr(from_pos + 5, where_pos - from_pos - 5);
+            where_clause = query.substr(where_pos + 6);
+        } else {
+            from_part = query.substr(from_pos + 5);
+            where_clause = "";
+        }
+
+        space(select_part);
+        space(from_part);
+        space(where_clause);
+
+        string columns_str;
+        istringstream select_iss(select_part);
+        select_iss >> columns_str;
+        if (columns_str != "SELECT") {
+            cerr << "Ошибка: Ожидалось ключевое слово SELECT." << endl;
+            return;
+        }
+
+        string column_names = select_part.substr(select_part.find("SELECT") + 7);
+
+        LinkedList parsed_columns;
+        // Проверка на символ '*', чтобы выбрать все колонки
+    if (column_names == "*") {
+    space(from_part); // Очистка лишних пробелов в from_part
+    string table_name = from_part; // Используем очищенную строку
+
+    Table* table = db.find_table(table_name);
+    if (!table) {
+        cerr << "Таблица не найдена: " << table_name << endl;
         return;
     }
 
-    // Извлекаем части запроса
-    select_part = query.substr(0, from_pos); // До FROM - часть SELECT
-    if (where_pos != string::npos) {
-        from_part = query.substr(from_pos + 5, where_pos - from_pos - 5); // Между FROM и WHERE
-        where_clause = query.substr(where_pos + 6); // После WHERE
+    // Добавляем все колонки таблицы в parsed_columns
+    for (int i = 0; i < table->columns_count; ++i) {
+        parsed_columns.push_back(table->columns[i]);
+    }
     } else {
-        from_part = query.substr(from_pos + 5); // После FROM до конца
-        where_clause = ""; // Если нет WHERE, условие пустое
+        // Если '*' не используется, разбираем указанные колонки
+        parseCol(column_names, parsed_columns);
     }
 
-    // Убираем лишние пробелы в каждой части
-    space(select_part);
-    space(from_part);
-    space(where_clause);
-
-    // Разбираем колонки из части SELECT
-    string columns_str;
-    istringstream select_iss(select_part);
-    select_iss >> columns_str; // Получаем ключевое слово SELECT
-    if (columns_str != "SELECT") {
-        cerr << "Ошибка: Ожидалось ключевое слово SELECT." << endl;
-        return;
-    }
-
-    string column_names = select_part.substr(select_part.find("SELECT") + 7); // Колонки после SELECT
-
-    // Используем динамический массив для хранения колонок
-    DynamicArray parsed_columns;
-    parseCol(column_names, parsed_columns);
-
-    // Разбираем таблицы из секции FROM
     istringstream from_iss(from_part);
     string table_name;
+    LinkedList table_names;
 
-    // Используем динамический массив для хранения таблиц
-    DynamicArray table_names;
-
-    // Извлекаем таблицы из секции FROM
     while (getline(from_iss, table_name, ',')) {
-        space(table_name); // Убираем лишние пробелы вокруг названий таблиц
+        space(table_name);
         table_names.push_back(table_name);
     }
 
-    // Проверка, найдены ли все таблицы в базе данных
-    DynamicArray tables;
+    LinkedList tables;
     for (int i = 0; i < table_names.size; ++i) {
-        Table* table = db.find_table(table_names[i]);
+        Table* table = db.find_table(table_names.get(i));
         if (table) {
             tables.push_back(table->table_name);
         } else {
-            cerr << "Таблица не найдена: " << table_names[i] << endl;
+            cerr << "Таблица не найдена: " << table_names.get(i) << endl;
             return;
         }
     }
 
-    // Выполняем выборку с учетом WHERE (если оно есть)
     if (table_names.size == 1) {
-        db.selectFROM(tables[0], parsed_columns.data, parsed_columns.size, where_clause);
+        // Создаем массив строк из LinkedList
+        string* columns_array = new string[parsed_columns.size];
+        for (int i = 0; i < parsed_columns.size; ++i) {
+            columns_array[i] = parsed_columns.get(i);
+        }
+
+        db.selectFROM(tables.get(0), columns_array, parsed_columns.size, where_clause);
+
+        delete[] columns_array; // Освобождаем память
     } else if (table_names.size == 2) {
-        db.selFROMmult(tables[0], tables[1], parsed_columns.data, parsed_columns.size, where_clause);
+        // Создаем массив строк из LinkedList
+        string* columns_array = new string[parsed_columns.size];
+        for (int i = 0; i < parsed_columns.size; ++i) {
+            columns_array[i] = parsed_columns.get(i);
+        }
+
+        db.selFROMmult(tables.get(0), tables.get(1), columns_array, parsed_columns.size, where_clause);
+
+        delete[] columns_array; // Освобождаем память
     } else {
         cerr << "Ошибка: Запрос может поддерживать только одну или две таблицы." << endl;
     }
 }
 
-static void parseCol(const string& columns_str, DynamicArray& parsed_columns) {
-    stringstream ss(columns_str);
-    string column;
-    while (getline(ss, column, ',')) {
-        // Убираем пробелы вокруг колонок
-        space(column);
-
-        // Добавляем колонку в динамический массив
-        parsed_columns.push_back(column);
+    static void parseCol(const string& columns_str, LinkedList& parsed_columns) {
+        stringstream ss(columns_str);
+        string column;
+        while (getline(ss, column, ',')) {
+            space(column);
+            parsed_columns.push_back(column);
+        }
     }
-}
 
-static void space(string& str) {
-    size_t first = str.find_first_not_of(' ');
-    size_t last = str.find_last_not_of(' ');
-    if (first != string::npos && last != string::npos) {
-        str = str.substr(first, (last - first + 1));
-    } else {
-        str.clear();
+    static void space(string& str) {
+        size_t first = str.find_first_not_of(' ');
+        size_t last = str.find_last_not_of(' ');
+        if (first != string::npos && last != string::npos) {
+            str = str.substr(first, (last - first + 1));
+        } else {
+            str.clear();
+        }
     }
-}
 };
 
 int main() {
